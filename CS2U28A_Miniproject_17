@@ -1,0 +1,209 @@
+import sqlite3
+import tkinter as tk
+from datetime import datetime, timedelta
+from tkinter import messagebox, ttk
+
+
+class RecipeDatabase:
+    def __init__(self):
+        self.conn = sqlite3.connect('recipe_database.db')
+        self.cursor = self.conn.cursor()
+        self.setup_database()
+
+    def setup_database(self):
+        self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS recipes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                ingredients TEXT NOT NULL,
+                instructions TEXT NOT NULL
+            )
+        ''')
+        self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS meal_plan (
+                date TEXT PRIMARY KEY,
+                recipe_id INTEGER,
+                FOREIGN KEY (recipe_id) REFERENCES recipes (id)
+            )
+        ''')
+        self.conn.commit()
+
+    #add recipe
+
+    def add_recipe(self, name, ingredients, instructions):
+        query = "INSERT INTO recipes (name, ingredients, instructions) VALUES (?, ?, ?)"
+        values = (name, ingredients, instructions)
+        self.cursor.execute(query, values)
+        self.conn.commit()
+    #view recipe
+    def view_recipes(self):
+        query = "SELECT * FROM recipes"
+        self.cursor.execute(query)
+        recipes = self.cursor.fetchall()
+        return recipes
+
+
+    #schedule meal
+    def schedule_meal(self, recipe_id, date):
+        query = "INSERT OR REPLACE INTO meal_plan (date, recipe_id) VALUES (?, ?)"
+        values = (date, recipe_id)
+        self.cursor.execute(query, values)
+        self.conn.commit()
+
+    #view meal plan
+    def view_meal_plan(self, start_date, days):
+        meal_plan = {}
+        for i in range(days):
+            current_date = start_date + timedelta(days=i)
+            query = '''
+                SELECT meal_plan.date, recipes.name
+                FROM meal_plan
+                JOIN recipes ON meal_plan.recipe_id = recipes.id
+                WHERE meal_plan.date = ?
+            '''
+            self.cursor.execute(query, (current_date.strftime('%Y-%m-%d'),))
+            result = self.cursor.fetchone()
+            meal_plan[current_date.strftime('%Y-%m-%d')] = result[1] if result else 'No meal scheduled'
+        return meal_plan
+
+    def close_connection(self):
+        self.conn.close()
+
+class RecipeApp:
+    def __init__(self, root, database):
+        self.root = root
+        self.root.title("Recipe Database and Meal Planner")
+        self.database = database
+
+        # Buttons
+        
+        self.root.geometry("500x300")
+
+        self.add_recipe_button = tk.Button(self.root, text="Add Recipe", command=self.show_add_recipe)
+        self.add_recipe_button.pack(pady=10)
+
+        self.view_recipes_button = tk.Button(self.root, text="View Recipes", command=self.view_recipes)
+        self.view_recipes_button.pack(pady=10)
+
+        self.schedule_meal_button = tk.Button(self.root, text="Schedule Meal", command=self.show_schedule_meal)
+        self.schedule_meal_button.pack(pady=10)
+
+        self.view_meal_plan_button = tk.Button(self.root, text="View Meal Plan", command=self.show_view_meal_plan)
+        self.view_meal_plan_button.pack(pady=10)
+
+    def show_add_recipe(self):
+        recipe_window = tk.Toplevel(self.root)
+        recipe_window.title("Add Recipe")
+
+        # Entry fields
+        tk.Label(recipe_window, text="Recipe Name:").pack()
+        self.recipe_name_entry = tk.Entry(recipe_window)
+        self.recipe_name_entry.pack()
+
+        tk.Label(recipe_window, text="Ingredients:").pack()
+        self.ingredients_entry = tk.Entry(recipe_window)
+        self.ingredients_entry.pack()
+
+        tk.Label(recipe_window, text="Instructions:").pack()
+        self.instructions_entry = tk.Entry(recipe_window)
+        self.instructions_entry.pack()
+
+        # Save button
+        save_button = tk.Button(recipe_window, text="Save Recipe", command=self.save_recipe)
+        save_button.pack()
+
+    def save_recipe(self):
+        name = self.recipe_name_entry.get()
+        ingredients = self.ingredients_entry.get()
+        instructions = self.instructions_entry.get()
+
+        self.database.add_recipe(name, ingredients, instructions)
+        messagebox.showinfo("Recipe Added", "Recipe added successfully!")
+
+    def view_recipes(self):
+        view_recipes_window = tk.Toplevel(self.root)
+        view_recipes_window.title("View Recipes")
+
+        # Treeview to display recipes
+        tree = ttk.Treeview(view_recipes_window, columns=('ID', 'Name', 'Ingredients', 'Instructions'))
+        tree.heading('#0', text='ID')
+        tree.heading('#1', text='Name')
+        tree.heading('#2', text='Ingredients')
+        tree.heading('#3', text='Instructions')
+        tree.pack()
+
+        # Populate treeview with recipes
+        recipes = self.database.view_recipes()
+        for recipe in recipes:
+            tree.insert('', 'end', values=recipe)
+
+    def show_schedule_meal(self):
+        schedule_meal_window = tk.Toplevel(self.root)
+        schedule_meal_window.title("Schedule Meal")
+
+        # Entry fields
+        tk.Label(schedule_meal_window, text="Recipe ID:").pack()
+        self.recipe_id_entry = tk.Entry(schedule_meal_window)
+        self.recipe_id_entry.pack()
+
+        tk.Label(schedule_meal_window, text="Date (YYYY-MM-DD):").pack()
+        self.date_entry = tk.Entry(schedule_meal_window)
+        self.date_entry.pack()
+
+        # Save button
+        save_button = tk.Button(schedule_meal_window, text="Schedule Meal", command=self.save_meal_schedule)
+        save_button.pack()
+
+    def save_meal_schedule(self):
+        recipe_id = self.recipe_id_entry.get()
+        date = self.date_entry.get()
+
+        try:
+            recipe_id = int(recipe_id)
+            datetime.strptime(date, '%Y-%m-%d')
+        except ValueError:
+            messagebox.showerror("Error", "Invalid recipe ID or date.")
+            return
+
+        self.database.schedule_meal(recipe_id, date)
+        messagebox.showinfo("Meal Scheduled", "Meal scheduled successfully!")
+
+    def show_view_meal_plan(self):
+        view_meal_plan_window = tk.Toplevel(self.root)
+        view_meal_plan_window.title("View Meal Plan")
+
+        # Entry fields
+        tk.Label(view_meal_plan_window, text="Start Date (YYYY-MM-DD):").pack()
+        self.start_date_entry = tk.Entry(view_meal_plan_window)
+        self.start_date_entry.pack()
+
+        tk.Label(view_meal_plan_window, text="Number of Days:").pack()
+        self.days_entry = tk.Entry(view_meal_plan_window)
+        self.days_entry.pack()
+
+        # Save button
+        save_button = tk.Button(view_meal_plan_window, text="View Meal Plan", command=self.view_meal_plan)
+        save_button.pack()
+
+    def view_meal_plan(self):
+        start_date_str = self.start_date_entry.get()
+        days_str = self.days_entry.get()
+
+        try:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+            days = int(days_str)
+        except ValueError:
+            messagebox.showerror("Error", "Invalid date or number of days.")
+            return
+
+        meal_plan = self.database.view_meal_plan(start_date, days)
+        for date, meal in meal_plan.items():
+            print(f"{date}: {meal}")
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    database = RecipeDatabase()
+    app = RecipeApp(root, database)
+    root.mainloop()
+
+    # Close the database connection
